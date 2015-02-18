@@ -20,6 +20,9 @@ Visit the [wiki](https://github.com/jondot/sneakers/wiki) for
 complete docs.
 
 
+[![Build Status](https://travis-ci.org/jondot/sneakers.svg?branch=master)](https://travis-ci.org/jondot/sneakers)
+
+
 ## Installation
 
 Add this line to your application's Gemfile:
@@ -153,17 +156,13 @@ Fork, implement, add tests, pull request, get my everlasting thanks and a respec
 
 ### Thanks:
 
-* Michael Klishin - @michaelklishin 
-* Ariel Zerahia - @arielze
-* @sergei-matheson
-* Sebastian Edwards - @SebastianEdwards
-* Tor Ivry - @torkale
+To all Sneakers [Contributors](https://github.com/jondot/sneakers/graphs/contributors) - you make this happen, thanks!
 
 
 
 # Copyright
 
-Copyright (c) 2013 [Dotan Nahum](http://gplus.to/dotan) [@jondot](http://twitter.com/jondot). See MIT-LICENSE for further details.
+Copyright (c) 2015 [Dotan Nahum](http://gplus.to/dotan) [@jondot](http://twitter.com/jondot). See MIT-LICENSE for further details.
 
 
 

@@ -96,7 +96,7 @@ class WithParamsWorker
              :ack => true,
              :timeout_job_after => 0.5
 
-  def work_with_params(msg, header, props)
+  def work_with_params(msg, delivery_info, metadata)
     msg
   end
 end
@@ -106,13 +106,6 @@ class TestPool
   def process(*args,&block)
     block.call
   end
-end
-
-class TestHandler
-  def acknowledge(tag);  end
-  def reject(tag);  end
-  def error(tag, err); end
-  def timeout(tag); end
 end
 
 def with_test_queuefactory(ctx, ack=true, msg=nil, nowork=false)
@@ -138,8 +131,8 @@ describe Sneakers::Worker do
     stub(@queue).opts { {} }
     stub(@queue).exchange { @exchange }
 
+    Sneakers.clear!
     Sneakers.configure(:daemonize => true, :log => 'sneakers.log')
-    Sneakers::Worker.configure_logger(Logger.new('/dev/null'))
     Sneakers::Worker.configure_metrics
   end
 
@@ -167,15 +160,51 @@ describe Sneakers::Worker do
 
       it "should build a queue with correct configuration given defaults" do
         @defaults_q.name.must_equal('defaults')
-        @defaults_q.opts.must_equal(
-          {:runner_config_file=>nil, :metrics=>nil, :daemonize=>true, :start_worker_delay=>0.2, :workers=>4, :log=>"sneakers.log", :pid_path=>"sneakers.pid", :timeout_job_after=>5, :prefetch=>10, :threads=>10, :durable=>true, :ack=>true, :amqp=>"amqp://guest:guest@localhost:5672", :vhost=>"/", :exchange=>"sneakers", :exchange_type=>:direct, :hooks=>{}, :handler=>Sneakers::Handlers::Oneshot, :heartbeat => 2}
+        @defaults_q.opts.to_hash.must_equal(
+          :runner_config_file => nil,
+          :metrics => nil,
+          :daemonize => true,
+          :start_worker_delay => 0.2,
+          :workers => 4,
+          :log => "sneakers.log",
+          :pid_path => "sneakers.pid",
+          :timeout_job_after => 5,
+          :prefetch => 10,
+          :threads => 10,
+          :durable => true,
+          :ack => true,
+          :amqp => "amqp://guest:guest@localhost:5672",
+          :vhost => "/",
+          :exchange => "sneakers",
+          :exchange_type => :direct,
+          :hooks => {},
+          :handler => Sneakers::Handlers::Oneshot,
+          :heartbeat  =>  2
         )
       end
 
       it "should build a queue with given configuration" do
         @dummy_q.name.must_equal('downloads')
-        @dummy_q.opts.must_equal(
-          {:runner_config_file=>nil, :metrics=>nil, :daemonize=>true, :start_worker_delay=>0.2, :workers=>4, :log=>"sneakers.log", :pid_path=>"sneakers.pid", :timeout_job_after=>1, :prefetch=>40, :threads=>50, :durable=>false, :ack=>false, :amqp=>"amqp://guest:guest@localhost:5672", :vhost=>"/", :exchange=>"dummy", :exchange_type=>:direct, :hooks=>{}, :handler=>Sneakers::Handlers::Oneshot, :heartbeat =>5}
+        @dummy_q.opts.to_hash.must_equal(
+          :runner_config_file => nil,
+          :metrics => nil,
+          :daemonize => true,
+          :start_worker_delay => 0.2,
+          :workers => 4,
+          :log => "sneakers.log",
+          :pid_path => "sneakers.pid",
+          :timeout_job_after => 1,
+          :prefetch => 40,
+          :threads => 50,
+          :durable => false,
+          :ack => false,
+          :amqp => "amqp://guest:guest@localhost:5672",
+          :vhost => "/",
+          :exchange => "dummy",
+          :exchange_type => :direct,
+          :hooks => {},
+          :handler => Sneakers::Handlers::Oneshot,
+          :heartbeat => 5
         )
       end
     end
@@ -222,9 +251,19 @@ describe Sneakers::Worker do
       w = AcksWorker.new(@queue, TestPool.new)
       mock(w).work("msg").once{ raise "foo" }
       handler = Object.new
-      mock(handler).error("tag", anything)
       header = Object.new
-      stub(header).delivery_tag { "tag" }
+      mock(handler).error(header, nil, "msg", anything)
+      mock(w.logger).error(/unexpected error \[Exception error="foo" error_class=RuntimeError backtrace=.*/)
+      w.do_work(header, nil, "msg", handler)
+    end
+
+    it "should log exceptions from workers" do
+      handler = Object.new
+      header = Object.new
+      w = AcksWorker.new(@queue, TestPool.new)
+      mock(w).work("msg").once{ raise "foo" }
+      mock(w.logger).error(/error="foo" error_class=RuntimeError backtrace=/)
+      mock(handler).error(header, nil, "msg", anything)
       w.do_work(header, nil, "msg", handler)
     end
 
@@ -233,55 +272,55 @@ describe Sneakers::Worker do
       stub(w).work("msg"){ sleep 10 }
 
       handler = Object.new
-      mock(handler).timeout("tag")
-
       header = Object.new
-      stub(header).delivery_tag { "tag" }
+
+      mock(handler).timeout(header, nil, "msg")
+      mock(w.logger).error(/timeout/)
 
       w.do_work(header, nil, "msg", handler)
     end
 
     describe "with ack" do
       before do
-        @header = Object.new
-        stub(@header).delivery_tag{ "tag" }
+        @delivery_info = Object.new
+        stub(@delivery_info).delivery_tag{ "tag" }
 
         @worker = AcksWorker.new(@queue, TestPool.new)
       end
 
       it "should work and handle acks" do
         handler = Object.new
-        mock(handler).acknowledge("tag")
+        mock(handler).acknowledge(@delivery_info, nil, :ack)
 
-        @worker.do_work(@header, nil, :ack, handler)
+        @worker.do_work(@delivery_info, nil, :ack, handler)
       end
 
       it "should work and handle rejects" do
         handler = Object.new
-        mock(handler).reject("tag")
+        mock(handler).reject(@delivery_info, nil, :reject)
 
-        @worker.do_work(@header, nil, :reject, handler)
+        @worker.do_work(@delivery_info, nil, :reject, handler)
       end
 
       it "should work and handle requeues" do
         handler = Object.new
-        mock(handler).reject("tag", true)
+        mock(handler).reject(@delivery_info, nil, :requeue, true)
 
-        @worker.do_work(@header, nil, :requeue, handler)
+        @worker.do_work(@delivery_info, nil, :requeue, handler)
       end
 
       it "should work and handle user-land timeouts" do
         handler = Object.new
-        mock(handler).timeout("tag")
+        mock(handler).timeout(@delivery_info, nil, :timeout)
 
-        @worker.do_work(@header, nil, :timeout, handler)
+        @worker.do_work(@delivery_info, nil, :timeout, handler)
       end
 
       it "should work and handle user-land error" do
         handler = Object.new
-        mock(handler).error("tag",anything)
+        mock(handler).error(@delivery_info, nil, :error, anything)
 
-        @worker.do_work(@header, nil, :error, handler)
+        @worker.do_work(@delivery_info, nil, :error, handler)
       end
     end
 
@@ -304,6 +343,12 @@ describe Sneakers::Worker do
       mock(@exchange).publish('msg', :routing_key => 'target').once
       w.do_work(nil, nil, 'msg', nil)
     end
+
+    it 'should be able to publish arbitrary metadata' do
+      w = PublishingWorker.new(@queue, TestPool.new)
+      mock(@exchange).publish('msg', :routing_key => 'target', :expiration => 1).once
+      w.publish 'msg', :to_queue => 'target', :expiration => 1
+    end
   end
 
 
@@ -317,20 +362,39 @@ describe Sneakers::Worker do
       w = LoggingWorker.new(@queue, TestPool.new)
       w.do_work(nil,nil,'msg',nil)
     end
+
+    it 'has a helper to constuct log prefix values' do
+      w = DummyWorker.new(@queue, TestPool.new)
+      w.instance_variable_set(:@id, 'worker-id')
+      m = w.log_msg('foo')
+      w.log_msg('foo').must_match(/\[worker-id\]\[#<Thread:.*>\]\[test-queue\]\[\{\}\] foo/)
+    end
+
+    describe '#worker_error' do
+      it 'only logs backtraces if present' do
+        w = DummyWorker.new(@queue, TestPool.new)
+        mock(w.logger).error(/cuz \[Exception error="boom!" error_class=RuntimeError\]/)
+        w.worker_error('cuz', RuntimeError.new('boom!'))
+      end
+    end
+
   end
 
 
   describe 'Metrics' do
     before do
       @handler = Object.new
-      stub(@handler).acknowledge("tag")
-      stub(@handler).reject("tag")
-      stub(@handler).timeout("tag")
-      stub(@handler).error("tag", anything)
-      stub(@handler).noop("tag")
-
       @header = Object.new
-      stub(@header).delivery_tag { "tag" }
+
+      # We don't care how these are called, we're focusing on metrics here.
+      stub(@handler).acknowledge
+      stub(@handler).reject
+      stub(@handler).timeout
+      stub(@handler).error
+      stub(@handler).noop
+
+      @delivery_info = Object.new
+      stub(@delivery_info).delivery_tag { "tag" }
 
       @w = MetricsWorker.new(@queue, TestPool.new)
       mock(@w.metrics).increment("work.MetricsWorker.started").once
@@ -341,25 +405,37 @@ describe Sneakers::Worker do
     it 'should be able to meter acks' do
       mock(@w.metrics).increment("foobar").once
       mock(@w.metrics).increment("work.MetricsWorker.handled.ack").once
-      @w.do_work(@header, nil, :ack, @handler)
+      @w.do_work(@delivery_info, nil, :ack, @handler)
     end
 
     it 'should be able to meter rejects' do
       mock(@w.metrics).increment("foobar").once
       mock(@w.metrics).increment("work.MetricsWorker.handled.reject").once
-      @w.do_work(@header, nil, nil, @handler)
+      @w.do_work(@header, nil, :reject, @handler)
+    end
+
+    it 'should be able to meter requeue' do
+      mock(@w.metrics).increment("foobar").once
+      mock(@w.metrics).increment("work.MetricsWorker.handled.requeue").once
+      @w.do_work(@header, nil, :requeue, @handler)
     end
 
     it 'should be able to meter errors' do
       mock(@w.metrics).increment("work.MetricsWorker.handled.error").once
       mock(@w).work('msg'){ raise :error }
-      @w.do_work(@header, nil, 'msg', @handler)
+      @w.do_work(@delivery_info, nil, 'msg', @handler)
     end
 
     it 'should be able to meter timeouts' do
       mock(@w.metrics).increment("work.MetricsWorker.handled.timeout").once
       mock(@w).work('msg'){ sleep 10 }
-      @w.do_work(@header, nil, 'msg', @handler)
+      @w.do_work(@delivery_info, nil, 'msg', @handler)
+    end
+
+    it 'defaults to noop when no response is specified' do
+      mock(@w.metrics).increment("foobar").once
+      mock(@w.metrics).increment("work.MetricsWorker.handled.noop").once
+      @w.do_work(@header, nil, nil, @handler)
     end
   end
 
@@ -367,23 +443,21 @@ describe Sneakers::Worker do
 
   describe 'With Params' do
     before do
+      @props = { :foo => 1 }
       @handler = Object.new
-      stub(@handler).acknowledge("tag")
-      stub(@handler).reject("tag")
-      stub(@handler).timeout("tag")
-      stub(@handler).error("tag", anything)
-      stub(@handler).noop("tag")
-
       @header = Object.new
-      stub(@header).delivery_tag { "tag" }
+
+      @delivery_info = Object.new
+
+      stub(@handler).noop(@delivery_info, {:foo => 1}, :ack)
 
       @w = WithParamsWorker.new(@queue, TestPool.new)
       mock(@w.metrics).timing("work.WithParamsWorker.time").yields.once
     end
 
     it 'should call work_with_params and not work' do
-      mock(@w).work_with_params(:ack, @header, {:foo => 1}).once
-      @w.do_work(@header, {:foo => 1 }, :ack, @handler)
+      mock(@w).work_with_params(:ack, @delivery_info, {:foo => 1}).once
+      @w.do_work(@delivery_info, {:foo => 1 }, :ack, @handler)
     end
   end
 end

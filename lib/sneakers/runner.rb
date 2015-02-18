@@ -4,7 +4,7 @@ require 'sneakers/workergroup'
 module Sneakers
   class Runner
     def initialize(worker_classes, opts={})
-      @runnerconfig = RunnerConfig.new(worker_classes)
+      @runnerconfig = RunnerConfig.new(worker_classes, opts)
     end
 
     def run
@@ -29,9 +29,9 @@ module Sneakers
       end
     end
 
-    def initialize(worker_classes)
+    def initialize(worker_classes, opts)
       @worker_classes = worker_classes
-      @conf = {}
+      @conf = opts
     end
 
     def to_h
@@ -41,7 +41,7 @@ module Sneakers
 
     def reload_config!
       Sneakers.logger.warn("Loading runner configuration...")
-      config_file = Sneakers::Config[:runner_config_file]
+      config_file = Sneakers::CONFIG[:runner_config_file]
 
       if config_file
         begin
@@ -55,7 +55,7 @@ module Sneakers
       config = make_serverengine_config
 
       [:before_fork, :after_fork].each do | hook |
-        Sneakers::Config[:hooks][hook] = config.delete(hook) if config[hook]
+        Sneakers::CONFIG[:hooks][hook] = config.delete(hook) if config[hook]
       end
 
 
@@ -65,11 +65,11 @@ module Sneakers
 
   private
     def make_serverengine_config
-      Sneakers::Config.merge(@conf).merge({
+      Sneakers::CONFIG.merge(@conf).merge({
         :worker_type => 'process',
         :worker_classes => @worker_classes
       })
     end
   end
-  
+
 end

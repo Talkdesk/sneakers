@@ -7,12 +7,12 @@ module Sneakers
     end
 
     def before_fork
-      fbefore = Sneakers::Config[:hooks][:before_fork]
+      fbefore = Sneakers::CONFIG[:hooks][:before_fork]
       fbefore.call if fbefore
     end
 
     def after_fork # note! this is not Serverengine#after_start, this is ours!
-      fafter = Sneakers::Config[:hooks][:after_fork]
+      fafter = Sneakers::CONFIG[:hooks][:after_fork]
       fafter.call if fafter
     end
 
@@ -28,7 +28,7 @@ module Sneakers
       # end per worker
       #
       until @stop_flag.wait_for_set(10.0)
-        Sneakers.logger.info("Heartbeat: running threads [#{Thread.list.count}]")
+        Sneakers.logger.debug("Heartbeat: running threads [#{Thread.list.count}]")
         # report aggregated stats?
       end
 
